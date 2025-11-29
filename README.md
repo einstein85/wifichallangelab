@@ -21,3 +21,7 @@ Please ensure that all activities are performed in controlled, authorized enviro
 ---
 
 If you would like a more detailed version with sample commands or attack flows included, I can extend this README.
+
+**Reference:**  
+Content on this page was developed with the help of material from:  
+https://www.emmanuelsolis.com/oswp.html
